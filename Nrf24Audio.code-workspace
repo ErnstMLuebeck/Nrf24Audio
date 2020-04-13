@@ -1,0 +1,15 @@
+{
+	"folders": [
+        {
+            "path": "Nrf24AudioRx"
+        },
+        {
+            "path": "Nrf24AudioTx"
+        }
+    ],
+    "settings": {
+        "files.associations": {
+            "cstddef": "cpp"
+        }
+    }
+}

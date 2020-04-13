@@ -1,0 +1,491 @@
+/*  NRF24 Audio Stream
+ *  
+ *  Author: E. M. Luebeck
+ *  Date: 2020-04-04
+ *  Hardware: Teensy 3.5, NRF24L01, Audioshield
+ *  
+ */
+
+#include <Arduino.h>
+#include <SPI.h>
+#include "RF24.h"
+
+#define AUDIO_BLOCK_SAMPLES  64
+#define NUM_SAMPLES_PER_BLOCK 64
+#define NUM_SAMPLES_PER_PACKET 16
+#define NUM_PACKETS_PER_BLOCK 4
+
+#include <Audio.h> 
+// AudioStream.h, Update: #define AUDIO_BLOCK_SAMPLES  64
+
+#include "AudioNrf24Rx.h"
+#include "PinMonitor.h"
+#include "LowPassFilter.h"
+
+/* Mute Button */
+#define MUTE_BUTTON_PIN 38
+
+/* Volume poti, analog in */
+#define VOL_POT_PIN 21
+
+// 12bit DAC PIN
+#define DAC_PIN A21
+
+// RF LED
+#define RF_LED_PIN 0
+
+// Debug PIN
+#define DEBUG_PIN 16
+#define DEBUG2_PIN 17
+
+/* A NRF24L01 PIN MAPPING */
+#define IRQ_PIN 5
+#define CE_PIN 6 
+#define MOSI_PIN 7
+#define CSN_PIN 8
+#define MISO_PIN 12
+#define SCK_PIN 14
+
+/* B NRF24L01 PIN MAPPING */
+#define IRQ_B_PIN 4
+#define CE_B_PIN 2
+#define CSN_B_PIN 3
+
+#define MOSI_B_PIN 7
+#define MISO_B_PIN 12
+#define SCK_B_PIN 14
+
+// AUDIO SHIELD SGTL5000
+#define SD_MOSI_PIN 7 // SD card SPI MOSI
+#define BLCK_PIN 9 // 1.41 MHz
+#define SD_CS_PIN 10 // SD card SPI chip select
+#define SD_MISO_PIN 12 // SD card SPI MISO
+#define SD_SCK_PIN 14 // SD card SPI clock
+#define MCLK_PIN 11 // 11.29 MHz
+#define I2S_RX_PIN 13 // I2S RX
+#define SDA_PIN 18 // I2C SDA
+#define SCL_PIN 19 // I2C SCL
+#define I2S_TX_PIN 22 // I2S TX
+#define I2S_LRCLK_PIN 23 // left/right clock
+
+#define NRF_CHANNEL_MIN 106   // lower (almost no) WIFI traffic at higher channels
+#define NRF_CHANNEL_MAX 117
+#define NRF_NUM_RETRIES 0
+#define NRF_DLY_RETRY 1 // delay*250us
+
+#define MODE_CHNLHPNG_OFF 0
+#define MODE_CHNLHPNG_LINEAR 1
+#define MODE_CHNLHPNG_PRAND 2
+
+#define STD_SOUND_LEVEL 0.05
+#define TS_VOLPOT_MS 100 /* sample time, [ms] */
+
+#define NUM_PINGPONG 2
+
+AudioNrf24Rx audioRx;
+
+// GUItool: begin automatically generated code
+AudioControlSGTL5000     sgtl5000_1;
+AudioSynthWaveform       waveform1;      //xy=221.0056915283203,360.99999237060547
+AudioMixer4              mixer1;         //xy=389.00569915771484,382.0056343078613
+//AudioOutputAnalogStereo  dacs1;          //xy=555.0056457519531,383.0056343078613
+AudioOutputI2S           i2s1;           //xy=551.0056495666504,405.00566482543945
+AudioConnection          patchCord1(waveform1, 0, mixer1, 0);
+AudioConnection          patchCord2(audioRx, 0, mixer1, 1);
+//AudioConnection          patchCord3(mixer1, 0, dacs1, 0);
+//AudioConnection          patchCord4(mixer1, 0, dacs1, 1);
+AudioConnection          patchCord5(mixer1, 0, i2s1, 0);
+AudioConnection          patchCord6(mixer1, 0, i2s1, 1);
+// GUItool: end automatically generated code
+
+// create NRF object
+RF24 radioA = RF24(CE_PIN, CSN_PIN);
+RF24 radioB = RF24(CE_B_PIN, CSN_B_PIN);
+
+byte NrRxPipe = 0;
+byte addrPipe[][6] = {"1Ad","2Ad","3Ad"};
+volatile bool FlgNewDataToReadA = 0;
+volatile bool FlgNewDataToReadB = 0;
+
+struct packet
+{
+      int16_t Buffer[16];
+
+};
+packet dataA, dataB;
+
+volatile unsigned long TiRx = 0;
+unsigned long TiNow = 0;
+
+unsigned long TiRxPacket_k = 0;
+unsigned long TiRxPacket_kn1 = 0;
+unsigned long TdRxPacket = 0;
+
+unsigned long TiRxBuffer_k = 0;
+unsigned long TiRxBuffer_kn1 = 0;
+unsigned long TdRxBuffer = 0;
+
+unsigned long TiUpdateBuffer_k = 0;
+unsigned long TiUpdateBuffer_kn1 = 0;
+unsigned long TdUpdateBuffer = 0;
+
+unsigned long TiVolPotUpdate = 0;
+
+float FacSampleRates = 1.0f;
+float FacSampleRatesSum = 1.0f;
+float FacSampleRatesMean = 1.0f;
+
+unsigned long TiUpdate = 0;
+int IdxBuffer = 0;
+
+unsigned long NumRxBuffersTot = 1;
+
+int IdxPingPongWrite = 0;
+int IdxPingPongRead = 2;
+
+bool FlgPingPongViolation = 0;
+bool NumAutoPacketIncr = 0;
+bool FlgAutoFreqHop = 0;
+
+bool StMuteOutput = 1;
+
+int16_t OutputBuffer[NUM_PINGPONG][NUM_SAMPLES_PER_BLOCK];
+int16_t FadeOut[NUM_SAMPLES_PER_BLOCK];
+int IdxStart = 0;
+int IdxPacket = 0;
+int VldPacket[2][4] = {0};
+
+int ModeChnlHop = MODE_CHNLHPNG_OFF;
+int ChnlNrf = NRF_CHANNEL_MIN;
+
+int ValVolPotRaw = 0;
+float ValVolPot = 0.0f;
+float LevelOutput = 0.0f;
+
+PinMonitor MuteButton = PinMonitor(MUTE_BUTTON_PIN, 100, LOW, 1);
+LowPassFilter FilterVolPot = LowPassFilter((float)TS_VOLPOT_MS/1000.0f, 0.08, 0.0);
+
+void ISR_NRF24_A();
+uint8_t getNxtChnl(uint8_t LstChnl, int _ModeChnlHop, bool Rst);
+uint8_t getPrbs7(bool Rst);
+
+void setup() 
+{
+    Serial.begin(115200);
+    delay(100);
+
+    SPI.setMOSI(MOSI_PIN);
+    SPI.setMISO(MISO_PIN);
+    SPI.setSCK(SCK_PIN);
+    SPI.setClockDivider(SPI_CLOCK_DIV4); // does not change anything
+
+    pinMode(RF_LED_PIN, OUTPUT);
+    digitalWrite(RF_LED_PIN, LOW);
+
+    pinMode(DEBUG_PIN, OUTPUT);
+    digitalWrite(DEBUG_PIN, LOW);
+
+    // pinMode(DEBUG2_PIN, OUTPUT);
+    // digitalWrite(DEBUG2_PIN, LOW);
+
+    /* Init A NRF24L01+ RF module */
+    Serial.print("Setup A NRF24L01+..");
+
+    radioA.begin(); 
+    radioA.setAutoAck(false);
+    radioA.setChannel(NRF_CHANNEL_MIN); 
+    radioA.setPALevel(RF24_PA_MAX);
+    radioA.setDataRate(RF24_2MBPS); 
+    radioA.setRetries(NRF_DLY_RETRY, NRF_NUM_RETRIES);
+    radioA.setCRCLength(RF24_CRC_8);
+    radioA.disableCRC();
+
+    Serial.println("OK");
+    //radioA.printDetails();
+
+    /* Init B NRF24L01+ RF module */
+    Serial.print("Setup B NRF24L01+..");
+
+    radioB.begin(); 
+    radioB.setAutoAck(false);
+    radioB.setChannel(NRF_CHANNEL_MIN); 
+    radioB.setPALevel(RF24_PA_MAX);
+    radioB.setDataRate(RF24_2MBPS); 
+    radioB.setRetries(NRF_DLY_RETRY, NRF_NUM_RETRIES);
+    radioB.setCRCLength(RF24_CRC_8);
+    radioB.disableCRC();
+
+    Serial.println("OK");
+    //radioB.printDetails();
+
+    /* Init soundcard */
+    Serial.print("Setup sound-card..");  
+    AudioMemory(10); /* 1 block = 128 samples = 3ms */
+
+    waveform1.frequency(440);
+    waveform1.amplitude(1.0);
+    waveform1.begin(WAVEFORM_TRIANGLE);
+    analogReference(EXTERNAL);
+
+    mixer1.gain(0, 0.0); /* triangle 440 Hz */
+    mixer1.gain(1, 0.0); /* NRF24 RX L */
+    mixer1.gain(2, 0.0); /* not connected */
+    mixer1.gain(3, 0.0); /* not connected */
+
+    /* headphone level (unused) */
+    float level_dB = 0;
+    float level = pow(10,level_dB/20);
+    if(level >= 1.0) level = 1.0;
+    if(level <= 0.0) level = 0.0;
+
+    sgtl5000_1.enable();
+    sgtl5000_1.volume(level);    
+    sgtl5000_1.lineOutLevel(13); // 20 = 2.14 Vpp, 13 = 3.16 Vpp
+
+    Serial.println("OK");
+
+    for(int i = 0; i < NUM_SAMPLES_PER_BLOCK; i++)
+    {
+        OutputBuffer[0][i] = 0;
+        OutputBuffer[1][i] = 0;
+        FadeOut[i] = 1.0 - (float)i * (1/(float)(NUM_SAMPLES_PER_BLOCK+1));
+    }
+
+    /* Activate NRF24 A */
+    radioA.maskIRQ(1,1,0); /* tx_ok, tx_fail, rx_ready: Mask interrupTsLght; 0 = unmasked */
+    attachInterrupt(IRQ_PIN, ISR_NRF24_A, FALLING); /* falling edge, NRF24L01 */
+    radioA.openReadingPipe(1, addrPipe[1]);
+    radioA.startListening();
+
+    /* Activate NRF24 B */
+    radioB.maskIRQ(1,1,0); /* tx_ok, tx_fail, rx_ready: Mask interrupTsLght; 0 = unmasked */
+    attachInterrupt(IRQ_B_PIN, ISR_NRF24_B, FALLING); /* falling edge, NRF24L01 */
+    radioB.openReadingPipe(1, addrPipe[1]);
+    radioB.startListening();
+}
+
+
+void loop() 
+{   TiNow = micros();
+
+    // if((TiNow-TiVolPotUpdate) >= (TS_VOLPOT_MS * 1000))
+    // {   TiVolPotUpdate = TiNow;
+
+    //     ValVolPotRaw = analogRead(VOL_POT_PIN); /* 0..1024 */
+
+    //     ValVolPot = FilterVolPot.calculate((float)ValVolPotRaw / 1024.0);
+
+    //     float level_dB = -65.0 + 60.0 * ValVolPot;
+    //     LevelOutput = pow(10, level_dB/20);
+    //     if(LevelOutput >= 1.0) LevelOutput = 1.0;
+    //     if(LevelOutput <= 0.0) LevelOutput = 0.0;
+
+    // }
+
+    MuteButton.update();
+
+    /* Toggle output mute with push button */
+    if(MuteButton.risingEdge())
+    {
+        if(StMuteOutput == 1) StMuteOutput = 0;
+        else StMuteOutput = 1;
+    }
+
+    if(StMuteOutput == 1)
+    {
+        mixer1.gain(1, 0.0); /* NRF24 RX L */
+    }
+    else
+    {
+        mixer1.gain(1, STD_SOUND_LEVEL); /* NRF24 RX L */
+    }
+
+    if(FlgNewDataToReadB)
+    {   FlgNewDataToReadB = 0;
+
+        /*----------------------------------------------------*/
+        radioB.read(&dataB, sizeof(packet));
+        /*----------------------------------------------------*/
+
+        /* Write packet into buffer and don't increment the start index 
+           if A receives a valid packet, it is overwritten */
+        if(IdxStart < (NUM_SAMPLES_PER_BLOCK - NUM_SAMPLES_PER_PACKET))
+        {
+            for(int i = 0; i < NUM_SAMPLES_PER_PACKET; i++)
+            {              
+                /* use ping pong buffering to reduce effect of not synchronized clocks */
+                OutputBuffer[IdxPingPongWrite][i+IdxStart] = dataB.Buffer[i];
+            }
+        }
+    }    
+
+    if(FlgNewDataToReadA)
+    {   FlgNewDataToReadA = 0;
+        NumAutoPacketIncr = 0;
+
+        digitalWrite(DEBUG_PIN, LOW);
+
+        /*----------------------------------------------------*/
+        radioA.read(&dataA, sizeof(packet));
+        /*----------------------------------------------------*/
+
+        digitalWrite(RF_LED_PIN, HIGH);
+
+        /* Time delay between packets */
+        TiRxPacket_kn1 = TiRxPacket_k;
+        TiRxPacket_k = micros();
+        TdRxPacket = TiRxPacket_k - TiRxPacket_kn1;
+
+        /* Write packet into buffer */
+        for(int i = 0; i < NUM_SAMPLES_PER_PACKET; i++)
+        {              
+            /* use ping pong buffering to reduce effect of not synchronized clocks */
+            OutputBuffer[IdxPingPongWrite][i+IdxStart] = dataA.Buffer[i];
+        }
+        IdxStart += NUM_SAMPLES_PER_PACKET;
+
+        /* Packet of buffer is valid */
+        if(IdxPacket < NUM_PACKETS_PER_BLOCK)
+        {   IdxPacket++;
+            VldPacket[IdxPingPongWrite][IdxPacket-1] = 1;
+        }
+
+        /* Buffer is filled with packets and ready to play */
+        if(IdxStart >= NUM_SAMPLES_PER_BLOCK) 
+        {
+            /* Buffer ready */
+            IdxStart = 0;
+            NumRxBuffersTot++;
+
+            /* Todo: Buffer post processing, interpolation of lost packets */
+
+            /* Ping-pong buffer read/write indices */
+            if(IdxPingPongWrite < NUM_PINGPONG-1) IdxPingPongWrite++;
+            else IdxPingPongWrite = 0;
+            if(IdxPingPongRead < NUM_PINGPONG-1) IdxPingPongRead++;
+            else IdxPingPongRead = 0;
+
+            /* Channel Hopping */
+            ChnlNrf = getNxtChnl(ChnlNrf, ModeChnlHop, 0);
+            radioA.setChannel(ChnlNrf);
+
+            /* Measure sample rate of transmitter and receiver */
+            if(NumRxBuffersTot >= (44100/128*60))
+            {
+                NumRxBuffersTot = 1;
+                FacSampleRatesSum = 0;
+            }
+
+            /* Time delay between complete buffers */
+            TiRxBuffer_kn1 = TiRxBuffer_k;
+            TiRxBuffer_k = micros();
+            TdRxBuffer = TiRxBuffer_k - TiRxBuffer_kn1;
+
+            /* Sample rate factor mean value calculation */
+            FacSampleRates = (float)TdUpdateBuffer/(float)TdRxBuffer;
+            FacSampleRatesSum += FacSampleRates;
+            FacSampleRatesMean = FacSampleRatesSum / NumRxBuffersTot;
+
+            //Serial.println(AudioMemoryUsageMax()); 
+        }
+
+    }
+
+    /* Auto-increase start index if one packet is lost */
+    unsigned long TdAutoPacketIncr = 0;
+    if(NumAutoPacketIncr == 0) TdAutoPacketIncr = 350;
+    else TdAutoPacketIncr = 300;
+
+    if((micros()-TiRxPacket_k) >= TdAutoPacketIncr)
+    {   /* Buffer finished or packet lost */
+        if(IdxPacket == NUM_PACKETS_PER_BLOCK)
+        {   IdxPacket = 0; /* 0 means break between blocks */
+            
+        } 
+        else if(IdxPacket > 0 && IdxPacket < NUM_PACKETS_PER_BLOCK)
+        {   /* Lost packet */
+            digitalWrite(DEBUG_PIN, HIGH);
+
+            IdxPacket++;
+            IdxStart += NUM_SAMPLES_PER_PACKET;
+            NumAutoPacketIncr++;
+
+            /* Time delay between packets */
+            TiRxPacket_kn1 = TiRxPacket_k;
+            TiRxPacket_k = micros();
+            TdRxPacket = TiRxPacket_k - TiRxPacket_kn1;
+        }
+        
+    }
+
+    /* Mute output if connection is lost */
+    if((micros()-TiRxBuffer_k) >= 200000)
+    {
+        StMuteOutput = 1;
+        ChnlNrf = getNxtChnl(ChnlNrf, ModeChnlHop, 1);
+        radioA.setChannel(ChnlNrf);
+
+        digitalWrite(RF_LED_PIN, LOW);
+    }
+
+    //digitalWrite(DEBUG2_PIN, LOW);
+ 
+}
+
+void ISR_NRF24_A()
+{   /* read dataA from NRF in main loop */
+    //radioA.available(&NrRxPipe);
+    FlgNewDataToReadA = 1;
+}
+
+void ISR_NRF24_B()
+{   /* read dataA from NRF in main loop */
+    //radioB.available(&NrRxPipe);
+    FlgNewDataToReadB = 1;
+}
+
+uint8_t getNxtChnl(uint8_t LstChnl, int _ModeChnlHop, bool Rst)
+{
+    uint8_t NxtChnl=0;
+    
+    switch(_ModeChnlHop)
+    {   // no hopping
+        case 0:
+            NxtChnl = NRF_CHANNEL_MIN;
+            break;
+            
+            // linear hopping sequence
+        case 1:
+            if (LstChnl < NRF_CHANNEL_MAX) NxtChnl = LstChnl+1;
+            else NxtChnl = NRF_CHANNEL_MIN;
+            break;
+            
+            // pseudo random hopping
+        case 2:
+            NxtChnl = NRF_CHANNEL_MIN + (getPrbs7(Rst) & 0b00000111);
+            break;
+            
+        // no hopping
+        default:
+            NxtChnl = NRF_CHANNEL_MIN;
+            break;
+    }
+    return(NxtChnl);
+}
+
+// An example of generating a "PRBS-7" sequence
+// https://en.wikipedia.org/wiki/Pseudorandom_binary_sequence
+// ..has a repetition period of 127 bits.
+uint8_t getPrbs7(bool Rst)
+{
+    uint8_t start = 0x02;
+    static uint8_t a = start;
+    
+    if(Rst) a = start;
+    
+    int newbit = (((a >> 6) ^ (a >> 5)) & 1);
+    a = ((a << 1) | newbit) & 0x7f;
+    
+    //Serial.println(a);
+    return(a);
+}
