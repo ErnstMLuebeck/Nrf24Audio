@@ -107,6 +107,11 @@ byte addrPipe[][6] = {"1Ad","2Ad","3Ad"};
 volatile bool FlgNewDataToReadA = 0;
 volatile bool FlgNewDataToReadB = 0;
 
+bool FlgNewDataToProcA = 0;
+bool FlgNewDataToProcB = 0;
+
+bool FlgTransmitterDetected = 0;
+
 struct packet
 {
       int16_t Buffer[16];
@@ -130,6 +135,8 @@ unsigned long TiUpdateBuffer_kn1 = 0;
 unsigned long TdUpdateBuffer = 0;
 
 unsigned long TiVolPotUpdate = 0;
+
+unsigned long TiPacketToBuffer = 0;
 
 float FacSampleRates = 1.0f;
 float FacSampleRatesSum = 1.0f;
@@ -300,54 +307,65 @@ void loop()
         mixer1.gain(1, STD_SOUND_LEVEL); /* NRF24 RX L */
     }
 
+
+    if(FlgNewDataToReadA)
+    {   FlgNewDataToReadA = 0;
+
+        /*----------------------------------------------------*/
+        radioA.read(&dataA, sizeof(packet));
+        /*----------------------------------------------------*/
+        FlgNewDataToProcA = 1;
+    }   
+
     if(FlgNewDataToReadB)
     {   FlgNewDataToReadB = 0;
 
         /*----------------------------------------------------*/
         radioB.read(&dataB, sizeof(packet));
         /*----------------------------------------------------*/
+        FlgNewDataToProcB = 1;
+    }    
 
-        /* Write packet into buffer and don't increment the start index 
-           if A receives a valid packet, it is overwritten */
-        if(IdxStart < (NUM_SAMPLES_PER_BLOCK - NUM_SAMPLES_PER_PACKET))
+    if(FlgNewDataToProcA || FlgNewDataToProcB)
+    {   
+        NumAutoPacketIncr = 0;
+
+        digitalWrite(RF_LED_PIN, HIGH);
+
+        /* Packet has already been written */
+        if((micros()-TiRxPacket_k) < 200)
         {
+            FlgNewDataToProcA = 0;
+            FlgNewDataToProcB = 0;
+        }
+        else
+        {
+            /* Time delay between packets */
+            TiRxPacket_kn1 = TiRxPacket_k;
+            TiRxPacket_k = micros();
+            TdRxPacket = TiRxPacket_k - TiRxPacket_kn1;
+        }
+
+        /* Write packet into buffer, module A has priority */
+        if(FlgNewDataToProcA)
+        {   digitalWrite(DEBUG_PIN, HIGH);
+            for(int i = 0; i < NUM_SAMPLES_PER_PACKET; i++)
+            {              
+                /* use ping pong buffering to reduce effect of not synchronized clocks */
+                OutputBuffer[IdxPingPongWrite][i+IdxStart] = dataA.Buffer[i];
+            }
+            IdxStart += NUM_SAMPLES_PER_PACKET;
+            FlgNewDataToProcA = 0;
+        }
+        else if(FlgNewDataToProcB)
+        {   digitalWrite(DEBUG_PIN, LOW);
             for(int i = 0; i < NUM_SAMPLES_PER_PACKET; i++)
             {              
                 /* use ping pong buffering to reduce effect of not synchronized clocks */
                 OutputBuffer[IdxPingPongWrite][i+IdxStart] = dataB.Buffer[i];
             }
-        }
-    }    
-
-    if(FlgNewDataToReadA)
-    {   FlgNewDataToReadA = 0;
-        NumAutoPacketIncr = 0;
-
-        digitalWrite(DEBUG_PIN, LOW);
-
-        /*----------------------------------------------------*/
-        radioA.read(&dataA, sizeof(packet));
-        /*----------------------------------------------------*/
-
-        digitalWrite(RF_LED_PIN, HIGH);
-
-        /* Time delay between packets */
-        TiRxPacket_kn1 = TiRxPacket_k;
-        TiRxPacket_k = micros();
-        TdRxPacket = TiRxPacket_k - TiRxPacket_kn1;
-
-        /* Write packet into buffer */
-        for(int i = 0; i < NUM_SAMPLES_PER_PACKET; i++)
-        {              
-            /* use ping pong buffering to reduce effect of not synchronized clocks */
-            OutputBuffer[IdxPingPongWrite][i+IdxStart] = dataA.Buffer[i];
-        }
-        IdxStart += NUM_SAMPLES_PER_PACKET;
-
-        /* Packet of buffer is valid */
-        if(IdxPacket < NUM_PACKETS_PER_BLOCK)
-        {   IdxPacket++;
-            VldPacket[IdxPingPongWrite][IdxPacket-1] = 1;
+            IdxStart += NUM_SAMPLES_PER_PACKET;
+            FlgNewDataToProcB = 0;
         }
 
         /* Buffer is filled with packets and ready to play */
@@ -366,8 +384,12 @@ void loop()
             else IdxPingPongRead = 0;
 
             /* Channel Hopping */
-            ChnlNrf = getNxtChnl(ChnlNrf, ModeChnlHop, 0);
-            radioA.setChannel(ChnlNrf);
+            if(ModeChnlHop != MODE_CHNLHPNG_OFF)
+            {
+                ChnlNrf = getNxtChnl(ChnlNrf, ModeChnlHop, 0);
+                radioA.setChannel(ChnlNrf);
+                radioB.setChannel(ChnlNrf);
+            }
 
             /* Measure sample rate of transmitter and receiver */
             if(NumRxBuffersTot >= (44100/128*60))
@@ -389,6 +411,7 @@ void loop()
             //Serial.println(AudioMemoryUsageMax()); 
         }
 
+        
     }
 
     /* Auto-increase start index if one packet is lost */
