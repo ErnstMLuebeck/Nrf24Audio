@@ -146,6 +146,8 @@ unsigned long TiUpdate = 0;
 int IdxBuffer = 0;
 
 unsigned long NumRxBuffersTot = 1;
+unsigned long NumPacketsTot = 0;
+unsigned long NumPacketsLost = 0;
 
 int IdxPingPongWrite = 0;
 int IdxPingPongRead = 2;
@@ -302,11 +304,11 @@ void loop()
     {
         mixer1.gain(1, 0.0); /* NRF24 RX L */
     }
-    else
+    if(StMuteOutput == 0)
     {
         mixer1.gain(1, STD_SOUND_LEVEL); /* NRF24 RX L */
-    }
 
+    }
 
     if(FlgNewDataToReadA)
     {   FlgNewDataToReadA = 0;
@@ -331,9 +333,10 @@ void loop()
         NumAutoPacketIncr = 0;
 
         digitalWrite(RF_LED_PIN, HIGH);
+        digitalWrite(DEBUG_PIN, LOW);
 
         /* Packet has already been written */
-        if((micros()-TiRxPacket_k) < 200)
+        if((TiNow-TiRxPacket_k) < 200)
         {
             FlgNewDataToProcA = 0;
             FlgNewDataToProcB = 0;
@@ -342,13 +345,16 @@ void loop()
         {
             /* Time delay between packets */
             TiRxPacket_kn1 = TiRxPacket_k;
-            TiRxPacket_k = micros();
+            TiRxPacket_k = TiNow;
             TdRxPacket = TiRxPacket_k - TiRxPacket_kn1;
+
+            NumPacketsTot++;
         }
 
         /* Write packet into buffer, module A has priority */
         if(FlgNewDataToProcA)
-        {   digitalWrite(DEBUG_PIN, HIGH);
+        {   //digitalWrite(DEBUG_PIN, HIGH);
+            
             for(int i = 0; i < NUM_SAMPLES_PER_PACKET; i++)
             {              
                 /* use ping pong buffering to reduce effect of not synchronized clocks */
@@ -358,7 +364,8 @@ void loop()
             FlgNewDataToProcA = 0;
         }
         else if(FlgNewDataToProcB)
-        {   digitalWrite(DEBUG_PIN, LOW);
+        {   //digitalWrite(DEBUG_PIN, LOW);
+            
             for(int i = 0; i < NUM_SAMPLES_PER_PACKET; i++)
             {              
                 /* use ping pong buffering to reduce effect of not synchronized clocks */
@@ -419,24 +426,32 @@ void loop()
     if(NumAutoPacketIncr == 0) TdAutoPacketIncr = 350;
     else TdAutoPacketIncr = 300;
 
-    if((micros()-TiRxPacket_k) >= TdAutoPacketIncr)
-    {   /* Buffer finished or packet lost */
-        if(IdxPacket == NUM_PACKETS_PER_BLOCK)
-        {   IdxPacket = 0; /* 0 means break between blocks */
-            
+    TiNow = micros();
+    if((TiNow-TiRxPacket_k) >= TdAutoPacketIncr)
+    {   
+        if(IdxStart == 0)
+        {   /* End of buffer or packet 1 lost */
+            if((TiNow-TiRxPacket_k) > 600)
+                digitalWrite(DEBUG_PIN, HIGH);
         } 
-        else if(IdxPacket > 0 && IdxPacket < NUM_PACKETS_PER_BLOCK)
+        else
         {   /* Lost packet */
+            NumPacketsLost++;
             digitalWrite(DEBUG_PIN, HIGH);
 
-            IdxPacket++;
-            IdxStart += NUM_SAMPLES_PER_PACKET;
-            NumAutoPacketIncr++;
+            if(IdxStart < (NUM_SAMPLES_PER_BLOCK - NUM_SAMPLES_PER_PACKET))
+            {
+                IdxStart += NUM_SAMPLES_PER_PACKET;
+                NumAutoPacketIncr++;
+            }
 
             /* Time delay between packets */
             TiRxPacket_kn1 = TiRxPacket_k;
-            TiRxPacket_k = micros();
+            TiRxPacket_k = TiNow;
             TdRxPacket = TiRxPacket_k - TiRxPacket_kn1;
+
+            /* Calculate packet error rate PER */
+            Serial.println(NumPacketsLost);
         }
         
     }
@@ -450,8 +465,6 @@ void loop()
 
         digitalWrite(RF_LED_PIN, LOW);
     }
-
-    //digitalWrite(DEBUG2_PIN, LOW);
  
 }
 
