@@ -6,15 +6,18 @@
  *  
  */
 
-#include <Wire.h>
+#include <Wire.h> 
 #include <SPI.h>
 #include <RF24.h>
+#include <FastLED.h>
 
 #define AUDIO_BLOCK_SAMPLES  64
 #define NUM_SAMPLES_PER_BLOCK 64
 #define NUM_SAMPLES_PER_PACKET 16
 
-#include <Audio.h> // #define AUDIO_BLOCK_SAMPLES  64
+#include <Audio.h> 
+// Update: /Applications/Arduino.app/Contents/Java/hardware/teensy/avr/cores/teensy4
+// #define AUDIO_BLOCK_SAMPLES  64
 #include <TimerOne.h>
 
 #include "AudioNrf24Tx.h"
@@ -23,12 +26,15 @@
 //#define DEBUG_SKIP_PACKET_TX
 
 /* Button1 */
-#define BUTTON1_PIN 0
+// LED strip WS2812B
+#define DATA1_PIN 2  
+#define NUM_LEDS 2
+
+#define BUTTON1_PIN 10
 
 #define DEBUG_PIN 17
 
 // NRF24L01 PIN MAPPING
-
 #define CSN_PIN 9 // new Teensy 4.0
 #define MOSI_PIN 11
 #define MISO_PIN 12
@@ -67,6 +73,8 @@ struct packet
 
 };
 packet data;
+
+CRGB led[NUM_LEDS];
 
 RF24 radio(CE_PIN, CSN_PIN);
 
@@ -122,6 +130,18 @@ void setup()
 
     pinMode(DEBUG_PIN, OUTPUT);
     digitalWrite(DEBUG_PIN, LOW);
+
+    Serial.println("OK");
+
+    /* Init LED strips pins */
+    Serial.print("Setup RGB LED..");
+    FastLED.addLeds<WS2812B, DATA1_PIN, GRB>(led, NUM_LEDS);
+
+    //FastLED.setMaxPowerInVoltsAndMilliamps(5, 5000); 
+    FastLED.setBrightness(255);
+
+    led[0] = CRGB(255, 0, 0);
+    FastLED.show();
 
     Serial.println("OK");
     
@@ -192,12 +212,18 @@ void loop()
         mixer1.gain(0, 1.0); /* 440 Hz */
         mixer1.gain(1, 0.0); /* LineIn L */
         mixer1.gain(2, 0.0); /* LineIn R */
+
+        led[0] = CRGB(0, 255, 0);
+        FastLED.show();
     }
     else if(StInputSelect == 1)
     {
         mixer1.gain(0, 0.0); /* 440 Hz */
         mixer1.gain(1, 1.0); /* LineIn L */
         mixer1.gain(2, 1.0); /* LineIn R */
+
+        led[0] = CRGB(0, 0, 255);
+        FastLED.show();
     }
 
     /* Check if buffer is filled with new samples */
