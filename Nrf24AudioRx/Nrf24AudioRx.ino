@@ -85,15 +85,12 @@
 AudioNrf24Rx audioRx;
 
 // GUItool: begin automatically generated code
-AudioControlSGTL5000     sgtl5000_1;
+AudioControlSGTL5000     audioShield;
 AudioSynthWaveform       waveform1;      //xy=221.0056915283203,360.99999237060547
 AudioMixer4              mixer1;         //xy=389.00569915771484,382.0056343078613
-//AudioOutputAnalogStereo  dacs1;          //xy=555.0056457519531,383.0056343078613
 AudioOutputI2S           i2s1;           //xy=551.0056495666504,405.00566482543945
 AudioConnection          patchCord1(waveform1, 0, mixer1, 0);
 AudioConnection          patchCord2(audioRx, 0, mixer1, 1);
-//AudioConnection          patchCord3(mixer1, 0, dacs1, 0);
-//AudioConnection          patchCord4(mixer1, 0, dacs1, 1);
 AudioConnection          patchCord5(mixer1, 0, i2s1, 0);
 AudioConnection          patchCord6(mixer1, 0, i2s1, 1);
 // GUItool: end automatically generated code
@@ -247,9 +244,9 @@ void setup()
     if(level >= 1.0) level = 1.0;
     if(level <= 0.0) level = 0.0;
 
-    sgtl5000_1.enable();
-    sgtl5000_1.volume(level);    
-    sgtl5000_1.lineOutLevel(13); // 20 = 2.14 Vpp, 13 = 3.16 Vpp
+    audioShield.enable();
+    audioShield.volume(level);    
+    audioShield.lineOutLevel(13); // 20 = 2.14 Vpp, 13 = 3.16 Vpp
 
     Serial.println("OK");
 
@@ -431,8 +428,8 @@ void loop()
     {   
         if(IdxStart == 0)
         {   /* End of buffer or packet 1 lost */
-            if((TiNow-TiRxPacket_k) > 600)
-                digitalWrite(DEBUG_PIN, HIGH);
+            if((TiNow-TiRxPacket_k) > 600);
+                //digitalWrite(DEBUG_PIN, HIGH);
         } 
         else
         {   /* Lost packet */
@@ -451,7 +448,7 @@ void loop()
             TdRxPacket = TiRxPacket_k - TiRxPacket_kn1;
 
             /* Calculate packet error rate PER */
-            Serial.println(NumPacketsLost);
+            //Serial.println(NumPacketsLost);
         }
         
     }

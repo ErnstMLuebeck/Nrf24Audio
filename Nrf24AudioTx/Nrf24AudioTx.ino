@@ -22,6 +22,7 @@
 
 #include "AudioNrf24Tx.h"
 #include "PinMonitor.h"
+#include "SignalMonitor.h"
 
 //#define DEBUG_SKIP_PACKET_TX
 
@@ -32,15 +33,29 @@
 
 #define BUTTON1_PIN 10
 
-#define DEBUG_PIN 17
+#define DMX_REDE 15//2
+#define DMX_RX_PIN 0 // not used
+#define DMX_TX_PIN 1 
 
-// NRF24L01 PIN MAPPING
+// Footswitches
+#define FS2_PIN 4
+#define FS1_PIN 5
+
+/* Standby Toggle */
+#define STANDBY_TOGGLE_PIN 10 // = SD CS, new Teensy 4.0
+
+// NRF24L01 MODULE A PIN MAPPING
 #define CSN_PIN 9 // new Teensy 4.0
 #define MOSI_PIN 11
 #define MISO_PIN 12
 #define SCK_PIN 13
 #define CE_PIN 14 // new Teensy 4.0
 #define IRQ_PIN 16 // new Teensy 4.0
+
+// NRF24L01 MODULE B PIN MAPPING
+#define CSN_B_PIN 3 // new Teensy 4.0
+#define CE_B_PIN 0 // new Teensy 4.0
+#define IRQ_B_PIN 17 // new Teensy 4.0
 
 // AUDIO SHIELD SGTL5000, Rev D (Teensy 4.0)
 #define I2S_TX_PIN 7 // I2S TX
@@ -55,8 +70,8 @@
 #define BLCK_PIN 21 // 1.41 MHz
 #define MCLK_PIN 23 // 11.29 MHz
 
-#define NRF_CHANNEL_MIN 106   // lower WIFI traffic at higher channels
-#define NRF_CHANNEL_MAX 117 
+#define NRF_CHANNEL_MIN 106   // lower (almost no) WIFI traffic at higher channels
+#define NRF_CHANNEL_MAX 117
 #define NRF_NUM_RETRIES 0
 #define NRF_DLY_RETRY 1 // delay*250us
 
@@ -74,14 +89,18 @@ struct packet
 };
 packet data;
 
-CRGB led[NUM_LEDS];
+CRGB leds[NUM_LEDS];
 
-RF24 radio(CE_PIN, CSN_PIN);
+//RF24 radioA(CE_PIN, CSN_PIN);
+
+// create NRF object
+RF24 radioA = RF24(CE_PIN, CSN_PIN);
+//RF24 radioB = RF24(CE_B_PIN, CSN_B_PIN);
 
 AudioNrf24Tx audioTx;
 
 // GUItool: begin automatically generated code
-AudioControlSGTL5000     sgtl5000_1;     //xy=221.0057029724121,264.0056781768799
+AudioControlSGTL5000     audioShield;     //xy=221.0057029724121,264.0056781768799
 AudioInputI2S            i2s2;           //xy=221.00569534301758,412.00566005706787
 AudioSynthWaveform       waveform1;      //xy=222.0056915283203,346.99999260902405
 AudioMixer4              mixer1;         //xy=389.00569915771484,382.0056343078613
@@ -90,10 +109,10 @@ AudioConnection          patchCord1(i2s2, 0, mixer1, 1);
 AudioConnection          patchCord2(i2s2, 1, mixer1, 2);
 AudioConnection          patchCord3(waveform1, 0, mixer1, 0);
 AudioConnection          patchCord4(mixer1, 0, i2s1, 0);
-//AudioConnection          patchCord5(mixer1, 0, i2s1, 1);
+AudioConnection          patchCord5(mixer1, 0, i2s1, 1);
 // GUItool: end automatically generated code
 
-AudioConnection          patchCord5(mixer1, 0, audioTx, 0);
+AudioConnection          patchCord6(mixer1, 0, audioTx, 0);
 
 float t;
 unsigned long TiNow = 0;
@@ -112,6 +131,8 @@ int StInputSelect = 0;
 
 PinMonitor Button1 = PinMonitor(BUTTON1_PIN, 4, LOW, 1);
 
+SignalMonitor StInputSelectMonitor = SignalMonitor(StInputSelect);
+
 void ISR_NRF24();
 void ISR_Timer5ms();
 uint8_t getNxtChnl(uint8_t LstChnl, int _ModeChnlHop, bool Rst);
@@ -123,24 +144,17 @@ void setup()
     delay(100);
   
     Serial.print("Setup I/O pins..");
-    pinMode(CE_PIN, OUTPUT);
-    pinMode(CSN_PIN, OUTPUT);
-    pinMode(IRQ_PIN, INPUT);
-    digitalWrite(IRQ_PIN, LOW);
-
-    pinMode(DEBUG_PIN, OUTPUT);
-    digitalWrite(DEBUG_PIN, LOW);
 
     Serial.println("OK");
 
     /* Init LED strips pins */
     Serial.print("Setup RGB LED..");
-    FastLED.addLeds<WS2812B, DATA1_PIN, GRB>(led, NUM_LEDS);
+    FastLED.addLeds<WS2812, DATA1_PIN, GRB>(leds, NUM_LEDS);
 
     //FastLED.setMaxPowerInVoltsAndMilliamps(5, 5000); 
     FastLED.setBrightness(255);
 
-    led[0] = CRGB(255, 0, 0);
+    leds[0] = CRGB(0, 255, 255);
     FastLED.show();
 
     Serial.println("OK");
@@ -152,16 +166,16 @@ void setup()
     SPI.setSCK(SCK_PIN);
     // SPI.setClockDivider(SPI_CLOCK_DIV2);  // default: DIV4
 
-    radio.begin(); 
-    radio.setAutoAck(false);
-    radio.setChannel(ChnlNrf); 
-    radio.setPALevel(RF24_PA_MAX);
-    radio.setDataRate(RF24_2MBPS);
-    radio.setCRCLength(RF24_CRC_8);
-    radio.disableCRC();
+    radioA.begin(); 
+    radioA.setAutoAck(false);
+    radioA.setChannel(ChnlNrf); 
+    radioA.setPALevel(RF24_PA_MAX);
+    radioA.setDataRate(RF24_2MBPS);
+    radioA.setCRCLength(RF24_CRC_8);
+    radioA.disableCRC();
 
     attachInterrupt(IRQ_PIN, ISR_NRF24, FALLING); /* falling edge, NRF24L01 */
-    radio.maskIRQ(0,1,1); /* tx_ok, tx_fail, rx_ready: Mask interrupTsLght; 0 = unmasked */
+    radioA.maskIRQ(0,1,1); /* tx_ok, tx_fail, rx_ready: Mask interrupTsLght; 0 = unmasked */
 
     Serial.println("OK");
 
@@ -169,9 +183,9 @@ void setup()
     Serial.print("Setup sound-card..");  
     AudioMemory(10); /* 1 block = 128 samples = 3ms */
     
-    sgtl5000_1.enable();
-    sgtl5000_1.volume(0.5);    
-    sgtl5000_1.lineOutLevel(13); // 20 = 2.14 Vpp, 13 = 3.16 Vpp
+    audioShield.enable();
+    audioShield.volume(0.5);    
+    audioShield.lineOutLevel(13); // 20 = 2.14 Vpp, 13 = 3.16 Vpp
 
     waveform1.frequency(440);
     waveform1.amplitude(1.0);
@@ -185,16 +199,19 @@ void setup()
 
     Serial.println("OK");
 
-    radio.openWritingPipe(addrPipe[1]);
+    radioA.openWritingPipe(addrPipe[1]);
 
-    //radio.openReadingPipe(1, addrPipe[1]);
-    //radio.startListening();
+    //radioA.openReadingPipe(1, addrPipe[1]);
+    //radioA.startListening();
 
     Serial.print("Setup interrupts..");
     Timer1.initialize(5000); /* initialize timer1, and set it to 5ms */
     Timer1.attachInterrupt(ISR_Timer5ms);  /* attaches as a timer overflow interrupt */
 
     Serial.println("OK");
+
+    leds[0] = CRGB(255, 255, 0);
+    FastLED.show();
 }
 
 void loop() 
@@ -207,23 +224,27 @@ void loop()
         else StInputSelect = 0;
         
     }
-    if(StInputSelect == 0)
-    {
-        mixer1.gain(0, 1.0); /* 440 Hz */
-        mixer1.gain(1, 0.0); /* LineIn L */
-        mixer1.gain(2, 0.0); /* LineIn R */
 
-        led[0] = CRGB(0, 255, 0);
-        FastLED.show();
-    }
-    else if(StInputSelect == 1)
+    if(StInputSelectMonitor.detectChange(StInputSelect))
     {
-        mixer1.gain(0, 0.0); /* 440 Hz */
-        mixer1.gain(1, 1.0); /* LineIn L */
-        mixer1.gain(2, 1.0); /* LineIn R */
+        if(StInputSelect == 0)
+        {
+            mixer1.gain(0, 1.0); /* 440 Hz */
+            mixer1.gain(1, 0.0); /* LineIn L */
+            mixer1.gain(2, 0.0); /* LineIn R */
 
-        led[0] = CRGB(0, 0, 255);
-        FastLED.show();
+            leds[0] = CRGB(255, 255, 0);
+            FastLED.show();
+        }
+        else if(StInputSelect == 1)
+        {
+            mixer1.gain(0, 0.0); /* 440 Hz */
+            mixer1.gain(1, 1.0); /* LineIn L */
+            mixer1.gain(2, 1.0); /* LineIn R */
+
+            leds[0] = CRGB(255, 0, 255);
+            FastLED.show();
+        }
     }
 
     /* Check if buffer is filled with new samples */
@@ -250,20 +271,20 @@ void loop()
             #ifdef DEBUG_SKIP_PACKET_TX
 
             /* Skip one of 4 packets */
-            if(IdxStart != 16) tx_ok = radio.writeFast(&data, sizeof(packet));   
+            if(IdxStart != 16) tx_ok = radioA.writeFast(&data, sizeof(packet));   
             
             #else
 
-            tx_ok = radio.writeFast(&data, sizeof(packet));
+            tx_ok = radioA.writeFast(&data, sizeof(packet));
 
             #endif
             //digitalWrite(DEBUG_PIN, LOW);
         }
         else
-        {   //radio.txStandBy();  
+        {   //radioA.txStandBy();  
             /* Channel Hopping */
             ChnlNrf = getNxtChnl(ChnlNrf, ModeChnlHop, 0);
-            radio.setChannel(ChnlNrf);
+            radioA.setChannel(ChnlNrf);
         }
         
     }
@@ -274,7 +295,7 @@ void ISR_NRF24()
 
     noInterrupts();
 
-    radio.available(&NrRxPipe);
+    radioA.available(&NrRxPipe);
     FlgNewDataToRead = 1;
 
     interrupts();
