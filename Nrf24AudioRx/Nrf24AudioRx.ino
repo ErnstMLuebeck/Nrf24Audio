@@ -68,7 +68,7 @@
 #define I2S_TX_PIN 22 // I2S TX
 #define I2S_LRCLK_PIN 23 // left/right clock
 
-#define NRF_CHANNEL_MIN 106   // lower (almost no) WIFI traffic at higher channels
+#define NRF_CHANNEL_MIN 96   // lower (almost no) WIFI traffic at higher channels
 #define NRF_CHANNEL_MAX 117
 #define NRF_NUM_RETRIES 0
 #define NRF_DLY_RETRY 1 // delay*250us
@@ -77,8 +77,8 @@
 #define MODE_CHNLHPNG_LINEAR 1
 #define MODE_CHNLHPNG_PRAND 2
 
-#define STD_SOUND_LEVEL 0.05
-#define TS_VOLPOT_MS 100 /* sample time, [ms] */
+#define MAX_SOUND_LEVEL 0.5
+#define TS_VOLPOT_MS 50 /* sample time, [ms] */
 
 #define NUM_PINGPONG 2
 
@@ -166,6 +166,8 @@ int ChnlNrf = NRF_CHANNEL_MIN;
 
 int ValVolPotRaw = 0;
 float ValVolPot = 0.0f;
+float ValVolPot_kn1 = 0.0f;
+float ValVolPotDiff = 0.05f;
 float LevelOutput = 0.0f;
 
 PinMonitor MuteButton = PinMonitor(MUTE_BUTTON_PIN, 100, LOW, 1);
@@ -184,6 +186,8 @@ void setup()
     SPI.setMISO(MISO_PIN);
     SPI.setSCK(SCK_PIN);
     SPI.setClockDivider(SPI_CLOCK_DIV4); // does not change anything
+
+    pinMode(VOL_POT_PIN, INPUT);
 
     pinMode(RF_LED_PIN, OUTPUT);
     digitalWrite(RF_LED_PIN, LOW);
@@ -274,21 +278,32 @@ void setup()
 void loop() 
 {   TiNow = micros();
 
-    // if((TiNow-TiVolPotUpdate) >= (TS_VOLPOT_MS * 1000))
-    // {   TiVolPotUpdate = TiNow;
-
-    //     ValVolPotRaw = analogRead(VOL_POT_PIN); /* 0..1024 */
-
-    //     ValVolPot = FilterVolPot.calculate((float)ValVolPotRaw / 1024.0);
-
-    //     float level_dB = -65.0 + 60.0 * ValVolPot;
-    //     LevelOutput = pow(10, level_dB/20);
-    //     if(LevelOutput >= 1.0) LevelOutput = 1.0;
-    //     if(LevelOutput <= 0.0) LevelOutput = 0.0;
-
-    // }
-
     MuteButton.update();
+
+    /* Volume poti handling */
+    if((TiNow-TiVolPotUpdate) >= (TS_VOLPOT_MS * 1000))
+    {   TiVolPotUpdate = TiNow;
+
+        ValVolPotRaw = analogRead(VOL_POT_PIN); /* 0..1024 */
+
+        ValVolPot = FilterVolPot.calculate((float)ValVolPotRaw / 1024.0);
+
+        if(ValVolPot >= (ValVolPot_kn1 + ValVolPotDiff)||
+        ValVolPot <= (ValVolPot_kn1 - ValVolPotDiff))
+        {
+            ValVolPot_kn1 = ValVolPot;
+
+            float level_dB = -65.0 + 65.0 * ValVolPot;
+            LevelOutput = pow(10, level_dB/20);
+            if(LevelOutput >= 1.0) LevelOutput = 1.0;
+            if(LevelOutput <= 0.0) LevelOutput = 0.0;
+
+            if(StMuteOutput == 0)
+            {
+                mixer1.gain(1, LevelOutput*MAX_SOUND_LEVEL); /* NRF24 RX L */
+            }
+        }
+    }
 
     /* Toggle output mute with push button */
     if(MuteButton.risingEdge())
@@ -303,7 +318,7 @@ void loop()
     }
     if(StMuteOutput == 0)
     {
-        mixer1.gain(1, STD_SOUND_LEVEL); /* NRF24 RX L */
+        mixer1.gain(1, LevelOutput*MAX_SOUND_LEVEL); /* NRF24 RX L */
 
     }
 

@@ -70,7 +70,7 @@
 #define BLCK_PIN 21 // 1.41 MHz
 #define MCLK_PIN 23 // 11.29 MHz
 
-#define NRF_CHANNEL_MIN 106   // lower (almost no) WIFI traffic at higher channels
+#define NRF_CHANNEL_MIN 96   // lower (almost no) WIFI traffic at higher channels
 #define NRF_CHANNEL_MAX 117
 #define NRF_NUM_RETRIES 0
 #define NRF_DLY_RETRY 1 // delay*250us
@@ -124,14 +124,18 @@ byte addrPipe[][6] = {"1Ad","2Ad","3Ad"};
 byte NrRxPipe = 0;
 bool FlgNewDataToRead = 0;
 
+bool FlgIsClippingRaw = 0;
+bool FlgIsClippingDeb = 0; /* debounced clipping flag */
+
 int ModeChnlHop = MODE_CHNLHPNG_OFF;
 int ChnlNrf = NRF_CHANNEL_MIN;
 
-int StInputSelect = 0;
+int StInputSelect = 1;
 
 PinMonitor Button1 = PinMonitor(BUTTON1_PIN, 4, LOW, 1);
 
 SignalMonitor StInputSelectMonitor = SignalMonitor(StInputSelect);
+SignalMonitor FlgIsClippingMonitor = SignalMonitor(FlgIsClippingRaw);
 
 void ISR_NRF24();
 void ISR_Timer5ms();
@@ -169,7 +173,7 @@ void setup()
     radioA.begin(); 
     radioA.setAutoAck(false);
     radioA.setChannel(ChnlNrf); 
-    radioA.setPALevel(RF24_PA_MAX);
+    radioA.setPALevel(RF24_PA_MIN);
     radioA.setDataRate(RF24_2MBPS);
     radioA.setCRCLength(RF24_CRC_8);
     radioA.disableCRC();
@@ -192,9 +196,9 @@ void setup()
     waveform1.begin(WAVEFORM_SINE);
     //analogReference(INTERNAL);
 
-    mixer1.gain(0, 1.0); /* 440 Hz */
-    mixer1.gain(1, 0.0); /* LineIn L */
-    mixer1.gain(2, 0.0); /* LineIn R */
+    mixer1.gain(0, 0.0); /* 440 Hz */
+    mixer1.gain(1, 1.0); /* LineIn L */
+    mixer1.gain(2, 1.0); /* LineIn R */
     mixer1.gain(3, 0.0); /* not connected */
 
     Serial.println("OK");
@@ -210,7 +214,7 @@ void setup()
 
     Serial.println("OK");
 
-    leds[0] = CRGB(255, 255, 0);
+    leds[0] = CRGB(255, 0, 255);
     FastLED.show();
 }
 
@@ -229,7 +233,7 @@ void loop()
     {
         if(StInputSelect == 0)
         {
-            mixer1.gain(0, 1.0); /* 440 Hz */
+            mixer1.gain(0, 0.5); /* 440 Hz */
             mixer1.gain(1, 0.0); /* LineIn L */
             mixer1.gain(2, 0.0); /* LineIn R */
 
@@ -288,6 +292,41 @@ void loop()
         }
         
     }
+
+    if(audioTx.isClipping())
+    {
+        FlgIsClippingRaw = 1;
+    }
+    else
+    {
+        FlgIsClippingRaw = 0;
+    }
+
+    if(FlgIsClippingMonitor.detectChange(FlgIsClippingRaw))
+    {
+        if(FlgIsClippingRaw)
+        {
+            leds[0] = CRGB(0, 255, 255);
+            FastLED.show();
+        }
+        else
+        {
+            if(StInputSelect == 0)
+            {
+                leds[0] = CRGB(255, 255, 0);
+                FastLED.show();
+            }
+            else if(StInputSelect == 1)
+            {
+                leds[0] = CRGB(255, 0, 255);
+                FastLED.show();
+            }
+        }
+
+    }
+
+            
+    
 }
 
 void ISR_NRF24()

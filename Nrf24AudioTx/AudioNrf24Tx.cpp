@@ -13,6 +13,8 @@ void AudioNrf24Tx::update(void)
     //digitalWrite(DEBUG_PIN, HIGH);
 
     audio_block_t *block;
+    bool FlgClippingTemp = 0;
+    bool FlgHotTemp = 0;
 
     block = receiveReadOnly();
 	if (block == NULL) return;
@@ -22,9 +24,16 @@ void AudioNrf24Tx::update(void)
         /* Open: Limiter/Compressor */
 
         InputBuffer[i] = block->data[i];
+
+        if(InputBuffer[i] >= 32000) /* int16_t maximum = 32767*/
+        {   FlgHotTemp = 0;
+            FlgClippingTemp = 1;
+        }
     }
 
 	new_output = true;
+
+    if(FlgClippingTemp) FlgClipping = 1;
 
 	release(block);
 
