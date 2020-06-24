@@ -2,13 +2,14 @@
  *  
  *  Author: E. M. Luebeck
  *  Date: 2020-04-04
- *  Hardware: Teensy 3.5, NRF24L01, Audioshield
+ *  Hardware: Teensy 4.0, NRF24L01, Audioshield
  *  
  */
 
 #include <Arduino.h>
 #include <SPI.h>
 #include "RF24.h"
+#include <FastLED.h>
 
 #define AUDIO_BLOCK_SAMPLES  64
 #define NUM_SAMPLES_PER_BLOCK 64
@@ -23,50 +24,51 @@
 #include "LowPassFilter.h"
 
 /* Mute Button */
-#define MUTE_BUTTON_PIN 38
+#define MUTE_BUTTON_PIN 10
+
+/* Button1 */
+// LED strip WS2812B
+#define DATA1_PIN 2  
+#define NUM_LEDS 2
 
 /* Volume poti, analog in */
-#define VOL_POT_PIN 21
+#define VOL_POT_PIN 22
 
 // 12bit DAC PIN
 #define DAC_PIN A21
 
 // RF LED
-#define RF_LED_PIN 0
+//#define RF_LED_PIN 0 // removed in HW V2
 
 // Debug PIN
-#define DEBUG_PIN 16
-#define DEBUG2_PIN 17
+//#define DEBUG_PIN 16
+//#define DEBUG2_PIN 17
 
-/* A NRF24L01 PIN MAPPING */
-#define IRQ_PIN 5
-#define CE_PIN 6 
-#define MOSI_PIN 7
-#define CSN_PIN 8
+// NRF24L01 MODULE A PIN MAPPING
+#define CSN_PIN 9 // new Teensy 4.0
+#define MOSI_PIN 11
 #define MISO_PIN 12
-#define SCK_PIN 14
+#define SCK_PIN 13
+#define CE_PIN 14 // new Teensy 4.0
+#define IRQ_PIN 16 // new Teensy 4.0
 
-/* B NRF24L01 PIN MAPPING */
-#define IRQ_B_PIN 4
-#define CE_B_PIN 2
-#define CSN_B_PIN 3
+// NRF24L01 MODULE B PIN MAPPING
+#define CSN_B_PIN 3 // new Teensy 4.0
+#define CE_B_PIN 0 // new Teensy 4.0
+#define IRQ_B_PIN 17 // new Teensy 4.0
 
-#define MOSI_B_PIN 7
-#define MISO_B_PIN 12
-#define SCK_B_PIN 14
-
-// AUDIO SHIELD SGTL5000
-#define SD_MOSI_PIN 7 // SD card SPI MOSI
-#define BLCK_PIN 9 // 1.41 MHz
+// AUDIO SHIELD SGTL5000, Rev D (Teensy 4.0)
+#define I2S_TX_PIN 7 // I2S TX
+#define I2S_RX_PIN 8 // I2S RX
 #define SD_CS_PIN 10 // SD card SPI chip select
+#define SD_MOSI_PIN 11 // SD card SPI MOSI
 #define SD_MISO_PIN 12 // SD card SPI MISO
-#define SD_SCK_PIN 14 // SD card SPI clock
-#define MCLK_PIN 11 // 11.29 MHz
-#define I2S_RX_PIN 13 // I2S RX
+#define SD_SCK_PIN 13 // SD card SPI clock
 #define SDA_PIN 18 // I2C SDA
 #define SCL_PIN 19 // I2C SCL
-#define I2S_TX_PIN 22 // I2S TX
-#define I2S_LRCLK_PIN 23 // left/right clock
+#define I2S_LRCLK_PIN 20 // left/right clock
+#define BLCK_PIN 21 // 1.41 MHz
+#define MCLK_PIN 23 // 11.29 MHz
 
 #define NRF_CHANNEL_MIN 96   // lower (almost no) WIFI traffic at higher channels
 #define NRF_CHANNEL_MAX 117
@@ -115,6 +117,8 @@ struct packet
 
 };
 packet dataA, dataB;
+
+CRGB leds[NUM_LEDS];
 
 volatile unsigned long TiRx = 0;
 unsigned long TiNow = 0;
@@ -182,6 +186,18 @@ void setup()
     Serial.begin(115200);
     delay(100);
 
+    /* Init LED strips pins */
+    Serial.print("Setup RGB LED..");
+    FastLED.addLeds<WS2812, DATA1_PIN, GRB>(leds, NUM_LEDS);
+
+    //FastLED.setMaxPowerInVoltsAndMilliamps(5, 5000); 
+    FastLED.setBrightness(255);
+
+    leds[0] = CRGB(0, 255, 255);
+    FastLED.show();
+
+    Serial.println("OK");
+
     SPI.setMOSI(MOSI_PIN);
     SPI.setMISO(MISO_PIN);
     SPI.setSCK(SCK_PIN);
@@ -189,11 +205,11 @@ void setup()
 
     pinMode(VOL_POT_PIN, INPUT);
 
-    pinMode(RF_LED_PIN, OUTPUT);
-    digitalWrite(RF_LED_PIN, LOW);
+    //pinMode(RF_LED_PIN, OUTPUT);
+    //digitalWrite(RF_LED_PIN, LOW);
 
-    pinMode(DEBUG_PIN, OUTPUT);
-    digitalWrite(DEBUG_PIN, LOW);
+    // pinMode(DEBUG_PIN, OUTPUT);
+    // digitalWrite(DEBUG_PIN, LOW);
 
     // pinMode(DEBUG2_PIN, OUTPUT);
     // digitalWrite(DEBUG2_PIN, LOW);
@@ -235,7 +251,7 @@ void setup()
     waveform1.frequency(440);
     waveform1.amplitude(1.0);
     waveform1.begin(WAVEFORM_TRIANGLE);
-    analogReference(EXTERNAL);
+    //analogReference(EXTERNAL);
 
     mixer1.gain(0, 0.0); /* triangle 440 Hz */
     mixer1.gain(1, 0.0); /* NRF24 RX L */
@@ -272,6 +288,9 @@ void setup()
     attachInterrupt(IRQ_B_PIN, ISR_NRF24_B, FALLING); /* falling edge, NRF24L01 */
     radioB.openReadingPipe(1, addrPipe[1]);
     radioB.startListening();
+
+    leds[0] = CRGB(255, 0, 255);
+    FastLED.show();
 }
 
 
@@ -344,8 +363,8 @@ void loop()
     {   
         NumAutoPacketIncr = 0;
 
-        digitalWrite(RF_LED_PIN, HIGH);
-        digitalWrite(DEBUG_PIN, LOW);
+        //digitalWrite(RF_LED_PIN, HIGH);
+        //digitalWrite(DEBUG_PIN, LOW);
 
         /* Packet has already been written */
         if((TiNow-TiRxPacket_k) < 200)
@@ -449,7 +468,7 @@ void loop()
         else
         {   /* Lost packet */
             NumPacketsLost++;
-            digitalWrite(DEBUG_PIN, HIGH);
+            //digitalWrite(DEBUG_PIN, HIGH);
 
             if(IdxStart < (NUM_SAMPLES_PER_BLOCK - NUM_SAMPLES_PER_PACKET))
             {
@@ -475,7 +494,7 @@ void loop()
         ChnlNrf = getNxtChnl(ChnlNrf, ModeChnlHop, 1);
         radioA.setChannel(ChnlNrf);
 
-        digitalWrite(RF_LED_PIN, LOW);
+        //digitalWrite(RF_LED_PIN, LOW);
     }
  
 }
