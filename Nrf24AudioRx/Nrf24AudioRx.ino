@@ -293,9 +293,6 @@ void setup()
     // Timer1.attachInterrupt(ISR_Timer5ms);  /* attaches as a timer overflow interrupt */
 
     // Serial.println("OK");
-
-    leds[0] = CRGB(255-0, 255-0, 255-100);
-    FastLED.show();
 }
 
 
