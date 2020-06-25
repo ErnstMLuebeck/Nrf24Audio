@@ -16,12 +16,14 @@
 #define NUM_SAMPLES_PER_PACKET 16
 #define NUM_PACKETS_PER_BLOCK 4
 
+#include <TimerOne.h>
 #include <Audio.h> 
 // AudioStream.h, Update: #define AUDIO_BLOCK_SAMPLES  64
 
 #include "AudioNrf24Rx.h"
 #include "PinMonitor.h"
 #include "LowPassFilter.h"
+#include "SignalMonitor.h"
 
 /* Mute Button */
 #define MUTE_BUTTON_PIN 10
@@ -158,6 +160,10 @@ bool NumAutoPacketIncr = 0;
 bool FlgAutoFreqHop = 0;
 
 bool StMuteOutput = 1;
+bool StRfPresent = 0;
+
+SignalMonitor StMuteMonitor = SignalMonitor(StMuteOutput);
+SignalMonitor StRfPresentMonitor = SignalMonitor(StRfPresent);
 
 int16_t OutputBuffer[NUM_PINGPONG][NUM_SAMPLES_PER_BLOCK];
 int16_t FadeOut[NUM_SAMPLES_PER_BLOCK];
@@ -174,7 +180,7 @@ float ValVolPot_kn1 = 0.0f;
 float ValVolPotDiff = 0.05f;
 float LevelOutput = 0.0f;
 
-PinMonitor MuteButton = PinMonitor(MUTE_BUTTON_PIN, 100, LOW, 1);
+PinMonitor MuteButton = PinMonitor(MUTE_BUTTON_PIN, 8000, LOW, 1);
 LowPassFilter FilterVolPot = LowPassFilter((float)TS_VOLPOT_MS/1000.0f, 0.08, 0.0);
 
 void ISR_NRF24_A();
@@ -189,11 +195,12 @@ void setup()
     /* Init LED strips pins */
     Serial.print("Setup RGB LED..");
     FastLED.addLeds<WS2812, DATA1_PIN, GRB>(leds, NUM_LEDS);
+    //FastLED.addLeds<1, WS2812, DATA1_PIN, GRB>(leds, NUM_LEDS);
 
     //FastLED.setMaxPowerInVoltsAndMilliamps(5, 5000); 
     FastLED.setBrightness(255);
 
-    leds[0] = CRGB(0, 255, 255);
+    leds[0] = CRGB(255-100, 255-0, 255-0);
     FastLED.show();
 
     Serial.println("OK");
@@ -204,15 +211,6 @@ void setup()
     SPI.setClockDivider(SPI_CLOCK_DIV4); // does not change anything
 
     pinMode(VOL_POT_PIN, INPUT);
-
-    //pinMode(RF_LED_PIN, OUTPUT);
-    //digitalWrite(RF_LED_PIN, LOW);
-
-    // pinMode(DEBUG_PIN, OUTPUT);
-    // digitalWrite(DEBUG_PIN, LOW);
-
-    // pinMode(DEBUG2_PIN, OUTPUT);
-    // digitalWrite(DEBUG2_PIN, LOW);
 
     /* Init A NRF24L01+ RF module */
     Serial.print("Setup A NRF24L01+..");
@@ -289,7 +287,14 @@ void setup()
     radioB.openReadingPipe(1, addrPipe[1]);
     radioB.startListening();
 
-    leds[0] = CRGB(255, 0, 255);
+    /* !!! Timer1 interrupts cause audio distortion !!! */
+    // Serial.print("Setup interrupts..");
+    // Timer1.initialize(5000); /* initialize timer1, and set it to 5ms */
+    // Timer1.attachInterrupt(ISR_Timer5ms);  /* attaches as a timer overflow interrupt */
+
+    // Serial.println("OK");
+
+    leds[0] = CRGB(255-0, 255-0, 255-100);
     FastLED.show();
 }
 
@@ -331,14 +336,29 @@ void loop()
         else StMuteOutput = 1;
     }
 
-    if(StMuteOutput == 1)
+    if(StMuteMonitor.detectChange(StMuteOutput) || StRfPresentMonitor.detectChange(StRfPresent))
     {
-        mixer1.gain(1, 0.0); /* NRF24 RX L */
-    }
-    if(StMuteOutput == 0)
-    {
-        mixer1.gain(1, LevelOutput*MAX_SOUND_LEVEL); /* NRF24 RX L */
+        if(StMuteOutput == 1)
+        {
+            mixer1.gain(1, 0.0); /* NRF24 RX L */
 
+            if(StRfPresent == 1)
+            {   /* Mute but RF available */
+                leds[0] = CRGB(255-0, 255-0, 255-100);
+            }
+            else
+            {   /* Mute because no RF available */
+                leds[0] = CRGB(255-100, 255-0, 255-0);
+            }
+            
+            FastLED.show();
+        }
+        if(StMuteOutput == 0)
+        {
+            mixer1.gain(1, LevelOutput*MAX_SOUND_LEVEL); /* NRF24 RX L */
+            leds[0] = CRGB(255-0, 255-100, 255-0);
+            FastLED.show();
+        }
     }
 
     if(FlgNewDataToReadA)
@@ -348,6 +368,7 @@ void loop()
         radioA.read(&dataA, sizeof(packet));
         /*----------------------------------------------------*/
         FlgNewDataToProcA = 1;
+        
     }   
 
     if(FlgNewDataToReadB)
@@ -362,9 +383,6 @@ void loop()
     if(FlgNewDataToProcA || FlgNewDataToProcB)
     {   
         NumAutoPacketIncr = 0;
-
-        //digitalWrite(RF_LED_PIN, HIGH);
-        //digitalWrite(DEBUG_PIN, LOW);
 
         /* Packet has already been written */
         if((TiNow-TiRxPacket_k) < 200)
@@ -491,12 +509,20 @@ void loop()
     if((micros()-TiRxBuffer_k) >= 200000)
     {
         StMuteOutput = 1;
-        ChnlNrf = getNxtChnl(ChnlNrf, ModeChnlHop, 1);
-        radioA.setChannel(ChnlNrf);
-
-        //digitalWrite(RF_LED_PIN, LOW);
+        StRfPresent = 0;
+        
+        if(ModeChnlHop != MODE_CHNLHPNG_OFF)
+        {
+            ChnlNrf = getNxtChnl(ChnlNrf, ModeChnlHop, 1);
+            radioA.setChannel(ChnlNrf);
+        }
+    }   
+    else
+    {
+        StRfPresent = 1;
     }
- 
+     
+
 }
 
 void ISR_NRF24_A()
@@ -509,6 +535,12 @@ void ISR_NRF24_B()
 {   /* read dataA from NRF in main loop */
     //radioB.available(&NrRxPipe);
     FlgNewDataToReadB = 1;
+}
+
+void ISR_Timer5ms()
+{   
+    MuteButton.update(); /* fall time is about 1ms */
+
 }
 
 uint8_t getNxtChnl(uint8_t LstChnl, int _ModeChnlHop, bool Rst)
