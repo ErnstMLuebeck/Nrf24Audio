@@ -25,6 +25,8 @@
 #include "LowPassFilter.h"
 #include "SignalMonitor.h"
 
+//#define DEBUG_RATATOB
+
 /* Mute Button */
 #define MUTE_BUTTON_PIN 10
 
@@ -133,6 +135,8 @@ unsigned long TiRxBuffer_k = 0;
 unsigned long TiRxBuffer_kn1 = 0;
 unsigned long TdRxBuffer = 0;
 
+unsigned long TdDebugPrint = 0;
+
 unsigned long TiUpdateBuffer_k = 0;
 unsigned long TiUpdateBuffer_kn1 = 0;
 unsigned long TdUpdateBuffer = 0;
@@ -151,6 +155,10 @@ int IdxBuffer = 0;
 unsigned long NumRxBuffersTot = 1;
 unsigned long NumPacketsTot = 0;
 unsigned long NumPacketsLost = 0;
+
+unsigned long CntrPacketsA = 1;
+unsigned long CntrPacketsB = 1;
+float RatAToB = 1;
 
 int IdxPingPongWrite = 0;
 int IdxPingPongRead = 2;
@@ -408,6 +416,7 @@ void loop()
             }
             IdxStart += NUM_SAMPLES_PER_PACKET;
             FlgNewDataToProcA = 0;
+            CntrPacketsA++;
         }
         else if(FlgNewDataToProcB)
         {   //digitalWrite(DEBUG_PIN, LOW);
@@ -419,7 +428,10 @@ void loop()
             }
             IdxStart += NUM_SAMPLES_PER_PACKET;
             FlgNewDataToProcB = 0;
+            CntrPacketsB++;
         }
+
+        RatAToB = (float)CntrPacketsA / (float)CntrPacketsB;
 
         /* Buffer is filled with packets and ready to play */
         if(IdxStart >= NUM_SAMPLES_PER_BLOCK) 
@@ -518,6 +530,16 @@ void loop()
     {
         StRfPresent = 1;
     }
+
+    #ifdef DEBUG_RATATOB
+
+    if((micros()-TdDebugPrint) >= 100000)
+    {
+        TdDebugPrint = micros();
+        Serial.println(RatAToB,6);
+    }
+
+    #endif
      
 
 }
