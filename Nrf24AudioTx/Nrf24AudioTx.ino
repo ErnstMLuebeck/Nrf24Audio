@@ -18,7 +18,7 @@
 #include <Audio.h> 
 // Update: /Applications/Arduino.app/Contents/Java/hardware/teensy/avr/cores/teensy4
 // #define AUDIO_BLOCK_SAMPLES  64
-#include <TimerOne.h>
+//#include <TimerOne.h>
 
 #include "AudioNrf24Tx.h"
 #include "PinMonitor.h"
@@ -74,6 +74,8 @@
 #define NRF_CHANNEL_MAX 117
 #define NRF_NUM_RETRIES 0
 #define NRF_DLY_RETRY 1 // delay*250us
+
+#define DBNC_MAX 8000 // button debounce counter maximum
 
 #define MODE_CHNLHPNG_OFF 0
 #define MODE_CHNLHPNG_LINEAR 1
@@ -132,13 +134,13 @@ int ChnlNrf = NRF_CHANNEL_MIN;
 
 int StInputSelect = 1;
 
-PinMonitor Button1 = PinMonitor(BUTTON1_PIN, 4, LOW, 1);
+PinMonitor Button1 = PinMonitor(BUTTON1_PIN, DBNC_MAX, LOW, 1);
 
 SignalMonitor StInputSelectMonitor = SignalMonitor(StInputSelect);
 SignalMonitor FlgIsClippingMonitor = SignalMonitor(FlgIsClippingRaw);
 
 void ISR_NRF24();
-void ISR_Timer5ms();
+//void ISR_Timer5ms();
 uint8_t getNxtChnl(uint8_t LstChnl, int _ModeChnlHop, bool Rst);
 uint8_t getPrbs7(bool Rst);
 
@@ -173,7 +175,7 @@ void setup()
     radioA.begin(); 
     radioA.setAutoAck(false);
     radioA.setChannel(ChnlNrf); 
-    radioA.setPALevel(RF24_PA_MIN);
+    radioA.setPALevel(RF24_PA_LOW); // RF24_PA_MIN = 0,RF24_PA_LOW, RF24_PA_HIGH, RF24_PA_MAX
     radioA.setDataRate(RF24_2MBPS);
     radioA.setCRCLength(RF24_CRC_8);
     radioA.disableCRC();
@@ -208,11 +210,12 @@ void setup()
     //radioA.openReadingPipe(1, addrPipe[1]);
     //radioA.startListening();
 
-    Serial.print("Setup interrupts..");
-    Timer1.initialize(5000); /* initialize timer1, and set it to 5ms */
-    Timer1.attachInterrupt(ISR_Timer5ms);  /* attaches as a timer overflow interrupt */
+    /* !!! Timer1 interrupts cause audio distortion !!! */
+    // Serial.print("Setup interrupts..");
+    // Timer1.initialize(5000); /* initialize timer1, and set it to 5ms */
+    // Timer1.attachInterrupt(ISR_Timer5ms);  /* attaches as a timer overflow interrupt */
 
-    Serial.println("OK");
+    // Serial.println("OK");
 
     leds[0] = CRGB(255, 0, 255);
     FastLED.show();
@@ -221,6 +224,8 @@ void setup()
 void loop() 
 {   
     TiNow = micros();
+
+    Button1.update(); /* fall time is about 1ms */
 
     /* Select input between Line in and test tone */
     if(Button1.risingEdge())
@@ -340,11 +345,11 @@ void ISR_NRF24()
     interrupts();
 }
 
-void ISR_Timer5ms()
-{   
-    Button1.update(); /* fall time is about 1ms */
+// void ISR_Timer5ms()
+// {   
+//     Button1.update(); /* fall time is about 1ms */
 
-}
+// }
 
 uint8_t getNxtChnl(uint8_t LstChnl, int _ModeChnlHop, bool Rst)
 {

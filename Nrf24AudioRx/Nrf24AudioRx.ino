@@ -79,6 +79,8 @@
 #define NRF_NUM_RETRIES 0
 #define NRF_DLY_RETRY 1 // delay*250us
 
+#define DBNC_MAX 8000
+
 #define MODE_CHNLHPNG_OFF 0
 #define MODE_CHNLHPNG_LINEAR 1
 #define MODE_CHNLHPNG_PRAND 2
@@ -188,7 +190,7 @@ float ValVolPot_kn1 = 0.0f;
 float ValVolPotDiff = 0.05f;
 float LevelOutput = 0.0f;
 
-PinMonitor MuteButton = PinMonitor(MUTE_BUTTON_PIN, 8000, LOW, 1);
+PinMonitor MuteButton = PinMonitor(MUTE_BUTTON_PIN, DBNC_MAX, LOW, 1);
 LowPassFilter FilterVolPot = LowPassFilter((float)TS_VOLPOT_MS/1000.0f, 0.08, 0.0);
 
 void ISR_NRF24_A();
