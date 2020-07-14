@@ -4,8 +4,6 @@
 
 void AudioNrf24Rx::update(void)
 {
-    //digitalWrite(DEBUG2_PIN, LOW);
-
     TiUpdateBuffer_kn1 = TiUpdateBuffer_k;
     TiUpdateBuffer_k = micros();
     TdUpdateBuffer = TiUpdateBuffer_k - TiUpdateBuffer_kn1;
@@ -15,12 +13,11 @@ void AudioNrf24Rx::update(void)
     if(IdxPingPong_k == IdxPingPong_kn1)
     {
         FlgPingPongViolation = 1;
-        //digitalWrite(DEBUG_PIN, HIGH);
 
     }
     else
     {   FlgPingPongViolation = 0;
-        //digitalWrite(DEBUG_PIN, LOW);
+
     }
     
     IdxPingPong_kn1 = IdxPingPongRead;

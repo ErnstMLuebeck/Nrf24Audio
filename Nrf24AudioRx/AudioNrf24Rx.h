@@ -8,9 +8,6 @@
 #define NUM_SAMPLES_PER_BLOCK 64
 #define NUM_SAMPLES_PER_PACKET 16
 
-#define DEBUG_PIN 16
-#define DEBUG2_PIN 17
-
 extern int16_t OutputBuffer[][NUM_SAMPLES_PER_BLOCK];
 extern int16_t FadeOut[NUM_SAMPLES_PER_BLOCK];
 

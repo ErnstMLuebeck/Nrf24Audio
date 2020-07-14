@@ -4,14 +4,10 @@
 
 #define NUM_SAMPLES_PER_BLOCK 64
 
-#define DEBUG_PIN 17
-
 extern int16_t InputBuffer[NUM_SAMPLES_PER_BLOCK];
 
 void AudioNrf24Tx::update(void)
 {
-    //digitalWrite(DEBUG_PIN, HIGH);
-
     audio_block_t *block;
     bool FlgClippingTemp = 0;
     bool FlgHotTemp = 0;
@@ -37,5 +33,4 @@ void AudioNrf24Tx::update(void)
 
 	release(block);
 
-    //digitalWrite(DEBUG_PIN, LOW);
 }
