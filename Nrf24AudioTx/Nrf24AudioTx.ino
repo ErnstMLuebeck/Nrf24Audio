@@ -23,6 +23,7 @@
 #include "AudioNrf24Tx.h"
 #include "PinMonitor.h"
 #include "SignalMonitor.h"
+#include "effect_remove_vocals.h"
 
 //#define DEBUG_SKIP_PACKET_TX
 
@@ -103,18 +104,26 @@ AudioNrf24Tx audioTx;
 
 // GUItool: begin automatically generated code
 AudioControlSGTL5000     audioShield;     //xy=221.0057029724121,264.0056781768799
-AudioInputI2S            i2s2;           //xy=221.00569534301758,412.00566005706787
+AudioInputI2S            i2s1;           //xy=221.00569534301758,412.00566005706787
 AudioSynthWaveform       waveform1;      //xy=222.0056915283203,346.99999260902405
 AudioMixer4              mixer1;         //xy=389.00569915771484,382.0056343078613
-AudioOutputI2S           i2s1;           //xy=542.0055999755859,380.005578994751
-AudioConnection          patchCord1(i2s2, 0, mixer1, 1);
-AudioConnection          patchCord2(i2s2, 1, mixer1, 2);
-AudioConnection          patchCord3(waveform1, 0, mixer1, 0);
-AudioConnection          patchCord4(mixer1, 0, i2s1, 0);
-AudioConnection          patchCord5(mixer1, 0, i2s1, 1);
+AudioEffectRemoveVocals  combineSymmetric;
+AudioEffectRemoveVocals  combineMono; 
+
+AudioConnection          patchCord1(waveform1, 0, mixer1, 0);
+
+AudioConnection          patchCord2(i2s1, 0, combineMono, 0);
+AudioConnection          patchCord3(i2s1, 1, combineMono, 1);
+AudioConnection          patchCord4(combineMono, 0, mixer1, 1);
+
+AudioConnection          patchCord5(i2s1, 0, combineSymmetric, 0);
+AudioConnection          patchCord6(i2s1, 1, combineSymmetric, 1);
+AudioConnection          patchCord7(combineSymmetric, 0, mixer1, 2);
+
+AudioConnection          patchCord8(mixer1, 0, audioTx, 0);
 // GUItool: end automatically generated code
 
-AudioConnection          patchCord6(mixer1, 0, audioTx, 0);
+
 
 float t;
 unsigned long TiNow = 0;
@@ -199,9 +208,12 @@ void setup()
     //analogReference(INTERNAL);
 
     mixer1.gain(0, 0.0); /* 440 Hz */
-    mixer1.gain(1, 1.0); /* LineIn L */
-    mixer1.gain(2, 1.0); /* LineIn R */
+    mixer1.gain(1, 1.0); /* LineIn L + R */
+    mixer1.gain(2, 0.0); /* LineIn L - R */
     mixer1.gain(3, 0.0); /* not connected */
+
+    combineMono.enable(0); /* 0 = L + R, 1 = L - R */ 
+    combineSymmetric.enable(1); /* 0 = L + R, 1 = L - R */
 
     Serial.println("OK");
 
@@ -238,9 +250,9 @@ void loop()
     {
         if(StInputSelect == 0)
         {
-            mixer1.gain(0, 0.5); /* 440 Hz */
-            mixer1.gain(1, 0.0); /* LineIn L */
-            mixer1.gain(2, 0.0); /* LineIn R */
+            mixer1.gain(0, 0.0); /* 440 Hz */
+            mixer1.gain(1, 0.0); /* LineIn L + R */
+            mixer1.gain(2, 1.0); /* LineIn L - R */
 
             leds[0] = CRGB(255, 255, 0);
             FastLED.show();
@@ -248,8 +260,8 @@ void loop()
         else if(StInputSelect == 1)
         {
             mixer1.gain(0, 0.0); /* 440 Hz */
-            mixer1.gain(1, 1.0); /* LineIn L */
-            mixer1.gain(2, 1.0); /* LineIn R */
+            mixer1.gain(1, 1.0); /* LineIn L + R */
+            mixer1.gain(2, 0.0); /* LineIn L - R */
 
             leds[0] = CRGB(255, 0, 255);
             FastLED.show();
