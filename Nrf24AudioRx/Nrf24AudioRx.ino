@@ -315,7 +315,7 @@ void loop()
     if((TiNow-TiVolPotUpdate) >= (TS_VOLPOT_MS * 1000))
     {   TiVolPotUpdate = TiNow;
 
-        ValVolPotRaw = analogRead(VOL_POT_PIN); /* 0..1024 */
+        ValVolPotRaw = 1024 - analogRead(VOL_POT_PIN); /* 0..1024 */
 
         ValVolPot = FilterVolPot.calculate((float)ValVolPotRaw / 1024.0);
 

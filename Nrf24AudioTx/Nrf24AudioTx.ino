@@ -141,11 +141,11 @@ bool FlgIsClippingDeb = 0; /* debounced clipping flag */
 int ModeChnlHop = MODE_CHNLHPNG_OFF;
 int ChnlNrf = NRF_CHANNEL_MIN;
 
-int StInputSelect = 1;
+int StInputBalun = 0;
 
-PinMonitor Button1 = PinMonitor(BUTTON1_PIN, DBNC_MAX, LOW, 1);
+PinMonitor Button1 = PinMonitor(BUTTON1_PIN, DBNC_MAX, HIGH, 1);
 
-SignalMonitor StInputSelectMonitor = SignalMonitor(StInputSelect);
+SignalMonitor StInputSelectMonitor = SignalMonitor(StInputBalun);
 SignalMonitor FlgIsClippingMonitor = SignalMonitor(FlgIsClippingRaw);
 
 void ISR_NRF24();
@@ -207,13 +207,13 @@ void setup()
     waveform1.begin(WAVEFORM_SINE);
     //analogReference(INTERNAL);
 
-    mixer1.gain(0, 0.0); /* 440 Hz */
-    mixer1.gain(1, 1.0); /* LineIn L + R */
-    mixer1.gain(2, 0.0); /* LineIn L - R */
-    mixer1.gain(3, 0.0); /* not connected */
-
     combineMono.enable(0); /* 0 = L + R, 1 = L - R */ 
     combineSymmetric.enable(1); /* 0 = L + R, 1 = L - R */
+
+    mixer1.gain(0, 0.0); /* 440 Hz */
+    mixer1.gain(1, 0.0); /* LineIn L + R */
+    mixer1.gain(2, 0.0); /* LineIn L - R */
+    mixer1.gain(2, 0.0); /* unused */
 
     Serial.println("OK");
 
@@ -229,8 +229,26 @@ void setup()
 
     // Serial.println("OK");
 
-    leds[0] = CRGB(255, 0, 255);
+    StInputBalun = Button1.getState();
+
+    if(StInputBalun == 0)
+    {   /* balanced input (MONO) */
+        mixer1.gain(0, 0.0); /* 440 Hz */
+        mixer1.gain(1, 0.0); /* LineIn L + R */
+        mixer1.gain(2, 1.0); /* LineIn L - R */
+
+        leds[0] = CRGB(255-0, 255-0, 255-255);
+    }
+    else if(StInputBalun == 1)
+    {   /* unbalanced input (STEREO to MONO) */
+        mixer1.gain(0, 0.0); /* 440 Hz */
+        mixer1.gain(1, 1.0); /* LineIn L + R */
+        mixer1.gain(2, 0.0); /* LineIn L - R */
+
+        leds[0] = CRGB(255-0, 255-255, 255-0);
+    }
     FastLED.show();
+
 }
 
 void loop() 
@@ -239,17 +257,18 @@ void loop()
 
     Button1.update(); /* fall time is about 1ms */
 
-    /* Select input between Line in and test tone */
-    if(Button1.risingEdge())
-    {   if(StInputSelect == 0) StInputSelect = 1;
-        else StInputSelect = 0;
-        
+    /* Select input 0 = L-R (balanced), 1 = L+R (unbalanced) */
+    if(Button1.anyEdge())
+    {   //if(StInputBalun == 0) StInputBalun = 1;
+        //else StInputBalun = 0;
+
+        StInputBalun = Button1.getState();
     }
 
-    if(StInputSelectMonitor.detectChange(StInputSelect))
+    if(StInputSelectMonitor.detectChange(StInputBalun))
     {
-        if(StInputSelect == 0)
-        {
+        if(StInputBalun == 0)
+        {   /* balanced input (MONO) */
             mixer1.gain(0, 0.0); /* 440 Hz */
             mixer1.gain(1, 0.0); /* LineIn L + R */
             mixer1.gain(2, 1.0); /* LineIn L - R */
@@ -257,8 +276,8 @@ void loop()
             leds[0] = CRGB(255, 255, 0);
             FastLED.show();
         }
-        else if(StInputSelect == 1)
-        {
+        else if(StInputBalun == 1)
+        {   /* unbalanced input (STEREO to MONO) */
             mixer1.gain(0, 0.0); /* 440 Hz */
             mixer1.gain(1, 1.0); /* LineIn L + R */
             mixer1.gain(2, 0.0); /* LineIn L - R */
@@ -328,12 +347,12 @@ void loop()
         }
         else
         {
-            if(StInputSelect == 0)
+            if(StInputBalun == 0)
             {
                 leds[0] = CRGB(255, 255, 0);
                 FastLED.show();
             }
-            else if(StInputSelect == 1)
+            else if(StInputBalun == 1)
             {
                 leds[0] = CRGB(255, 0, 255);
                 FastLED.show();
