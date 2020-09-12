@@ -71,7 +71,7 @@
 #define BLCK_PIN 21 // 1.41 MHz
 #define MCLK_PIN 23 // 11.29 MHz
 
-#define NRF_CHANNEL_MIN 96   // lower (almost no) WIFI traffic at higher channels
+#define NRF_CHANNEL_MIN 20   // lower (almost no) WIFI traffic at higher channels
 #define NRF_CHANNEL_MAX 117
 #define NRF_NUM_RETRIES 0
 #define NRF_DLY_RETRY 1 // delay*250us
@@ -155,7 +155,7 @@ uint8_t getPrbs7(bool Rst);
 
 void setup() 
 {
-    Serial.begin(115200);
+    Serial.begin(1000000);
     delay(100);
   
     Serial.print("Setup I/O pins..");

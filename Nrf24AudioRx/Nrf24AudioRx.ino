@@ -26,6 +26,7 @@
 #include "SignalMonitor.h"
 
 //#define DEBUG_RATATOB
+//#define DEBUG_RATFS
 
 /* Mute Button */
 #define MUTE_BUTTON_PIN 10
@@ -74,7 +75,7 @@
 #define BLCK_PIN 21 // 1.41 MHz
 #define MCLK_PIN 23 // 11.29 MHz
 
-#define NRF_CHANNEL_MIN 96   // lower (almost no) WIFI traffic at higher channels
+#define NRF_CHANNEL_MIN 20   // lower (almost no) WIFI traffic at higher channels
 #define NRF_CHANNEL_MAX 117
 #define NRF_NUM_RETRIES 0
 #define NRF_DLY_RETRY 1 // delay*250us
@@ -147,9 +148,9 @@ unsigned long TiVolPotUpdate = 0;
 
 unsigned long TiPacketToBuffer = 0;
 
-float FacSampleRates = 1.0f;
-float FacSampleRatesSum = 1.0f;
-float FacSampleRatesMean = 1.0f;
+double FacSampleRates = 1.0f;
+double FacSampleRatesSum = 1.0f;
+double FacSampleRatesMean = 1.0f;
 
 unsigned long TiUpdate = 0;
 int IdxBuffer = 0;
@@ -160,7 +161,7 @@ unsigned long NumPacketsLost = 0;
 
 unsigned long CntrPacketsA = 1;
 unsigned long CntrPacketsB = 1;
-float RatAToB = 1;
+double RatAToB = 1;
 
 int IdxPingPongWrite = 0;
 int IdxPingPongRead = 2;
@@ -199,7 +200,7 @@ uint8_t getPrbs7(bool Rst);
 
 void setup() 
 {
-    Serial.begin(115200);
+    Serial.begin(1000000);
     delay(100);
 
     /* Init LED strips pins */
@@ -533,15 +534,27 @@ void loop()
         StRfPresent = 1;
     }
 
-    #ifdef DEBUG_RATATOB
+
 
     if((micros()-TdDebugPrint) >= 100000)
-    {
-        TdDebugPrint = micros();
-        Serial.println(RatAToB,6);
+    {   TdDebugPrint = micros();
+    
+    #ifdef DEBUG_RATATOB
+        Serial.print(RatAToB, 6);
+        Serial.print(", ");
+    #endif
+
+    #ifdef DEBUG_RATFS
+        Serial.print(FacSampleRatesMean, 10);
+        Serial.println(",");
+        //Serial.println();
+    #endif
+
+
     }
 
-    #endif
+
+    
      
 
 }
